@@ -1,16 +1,16 @@
 import Combine
 import Foundation
 
+
+/// This allows to hold records array and offset value
+struct AirtableResponse {
+    var records: [Record] = []
+    var offset: String? = ""
+}
+
 /// Client used to manipulate an Airtable base.
 ///
 /// This is the facade of the library, used to create, modify and get records and attachments from an Airtable base.
-
-/// Added to allow for paginated requests
-struct AirtableResponse {
-    var records: [Record] = []
-    var offset: String? = "" // Keeps track of page offsets for multipage requests
-}
-
 public final class Airtable {
     
     /// ID of the base manipulated by the client.
@@ -21,9 +21,7 @@ public final class Airtable {
     
     private static let batchLimit: Int = 10
     private static let airtableURL: URL = URL(string: "https://api.airtable.com/v0")!
-    private var baseURL: URL {
-         Self.airtableURL.appendingPathComponent(baseID)
-    }
+    private var baseURL: URL { Self.airtableURL.appendingPathComponent(baseID) }
     
     private let requestEncoder: RequestEncoder = RequestEncoder()
     private let responseDecoder: ResponseDecoder = ResponseDecoder()
@@ -34,7 +32,7 @@ public final class Airtable {
     /// - Parameters:
     ///   - baseID: The ID of the base manipulated by the client.
     ///   - apiKey: The API key of the user manipulating the base.
-    public init(baseID: String, apiKey: String ) {
+    public init(baseID: String, apiKey: String) {
         self.baseID = baseID
         self.apiKey = apiKey
     }
@@ -46,65 +44,48 @@ public final class Airtable {
     /// - Parameters:
     ///   - tableName: Name of the table to list records from.
     ///   - fields: Names of the fields that should be included in the response.
+    @available(iOS 14.0, *)
+    public func list(tableName: String, fields: [String] = [], view: String? = nil) -> AnyPublisher<[Record], AirtableError> {
         
-    public func list(tableName: String, fields: [String] = []) -> AnyPublisher<[Record], AirtableError> {
-        let queryItems = fields.isEmpty ? nil : fields.map { URLQueryItem(name: "fields[]", value: $0) }
-        let request = buildRequest(method: "GET", path: tableName, queryItems: queryItems)
+        let pageOffsetPublisher = CurrentValueSubject<String?, Never>(nil)
         
-        return performRequest(request, decoder: responseDecoder.decodeRecords(data:))
+        return pageOffsetPublisher
+            .flatMap({ offset in
+                return self.loadPage( tableName: tableName, fields: fields, view: view, withOffset: offset)
+            })
+            .handleEvents(receiveOutput: { (response: AirtableResponse) in
+                if response.offset != nil {
+                    pageOffsetPublisher.send(response.offset)
+                } else {
+                    pageOffsetPublisher.send(completion: .finished)
+                }
+            })
+            .reduce([Record](), { allRecords, response in
+                return response.records + allRecords
+            })
+            .eraseToAnyPublisher()
     }
     
-    ///
-    /// Lists all records in tables that exceed Airtable's 100-record pagination
-    /// limit by making use of offset values. The next two functions combine to build a
-    /// recursive publisher. It's based on the method layed out here:
-    /// https://www.donnywals.com/recursively-execute-a-paginated-network-call-with-combine/
-    ///
-    /// It works, with no error checking though
-    
-    private func loadPage( tableName: String, fields: [String] = [], view: String? = nil, withOffset offset: String?) -> AnyPublisher<AirtableResponse, AirtableError>  {
-      // this would be the individual network call
-        var queryItems = fields.isEmpty ? nil : fields.map { URLQueryItem(name: "fields[]", value: $0) }
-        if queryItems != nil {
-            if let v = view {
-                let vqi = URLQueryItem(name: "view", value: v)
-                queryItems?.insert(vqi, at: 0)
-            }
-        }
-        let request = buildRequest(method: "GET", path: tableName, queryItems: queryItems , offset: offset )
+    private func loadPage(tableName: String, fields: [String] = [], view: String? = nil, withOffset offset: String?) -> AnyPublisher<AirtableResponse, AirtableError>  {
         
-        guard let urlRequest = request else {
-            let error = AirtableError.invalidParameters(operation: #function, parameters: [request as Any])
+        var queryItems: [URLQueryItem]? = fields.isEmpty ? nil : fields.map { URLQueryItem(name: "fields[]", value: $0) }
+        
+        if let view = view {
+            let viewQueryItem = URLQueryItem(name: "view", value: view)
+            queryItems?.insert(viewQueryItem, at: 0)
+        }
+        
+        guard let request = buildRequest(method: "GET", path: tableName, queryItems: queryItems, offset: offset) else {
+            let error = AirtableError.invalidParameters(operation: #function, parameters: [String(describing: queryItems)])
             return Fail(error: error).eraseToAnyPublisher()
         }
-
-        return URLSession.shared.dataTaskPublisher(for: urlRequest)
+        let publisher = URLSession.shared.dataTaskPublisher(for: request)
             .tryMap(errorHander.mapResponse(_:))
             .tryMap( responseDecoder.decodeRecordsWithOffset(data:) )
             .mapError(errorHander.mapError(_:))
             .eraseToAnyPublisher()
-    }
-
-    @available(iOS 14.0, *)
-    public func listAllRecords(tableName: String, fields: [String] = [], view: String? = nil) -> AnyPublisher<[Record], AirtableError> {
         
-        let pageOffsetPublisher = CurrentValueSubject<String?, Never>(nil)
-
-        return pageOffsetPublisher
-          .flatMap({ offset in
-            return self.loadPage( tableName: tableName, fields: fields, view: view, withOffset: offset)
-          })
-          .handleEvents(receiveOutput: { (response: AirtableResponse) in
-            if response.offset != nil {
-              pageOffsetPublisher.send(response.offset)
-            } else {
-              pageOffsetPublisher.send(completion: .finished)
-            }
-          })
-          .reduce([Record](), { allRecords, response in
-            return response.records + allRecords
-          })
-          .eraseToAnyPublisher()
+        return publisher
     }
     
     /// Gets a single record in a table.
@@ -257,11 +238,9 @@ extension Airtable {
         let url: URL?
         var parameters = queryItems ?? [URLQueryItem]()
         
-        /// Added parameter for incorporating offset values to method
-        if let off = offset {
-            let qi = URLQueryItem(name: "offset", value: off)
-            parameters.insert( qi, at: 0)
-            //(URLQueryItem(name: "offset", value: offset))
+        if let offsetString = offset {
+            let queryItem = URLQueryItem(name: "offset", value: offsetString)
+            parameters.insert(queryItem, at: 0)
         }
         if !parameters.isEmpty {
             var components = URLComponents(url: baseURL.appendingPathComponent(path), resolvingAgainstBaseURL: false)
@@ -285,7 +264,6 @@ extension Airtable {
                 return nil
             }
         }
-        
         return request
     }
 }
