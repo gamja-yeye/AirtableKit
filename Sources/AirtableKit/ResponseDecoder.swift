@@ -4,7 +4,6 @@ import Foundation
 ///
 /// Converts JSON objects to `Record`s and `Attachment`s.
 final class ResponseDecoder {
-    
     /// Date formatter used for writing dates to JSON objects
     static let formatter: DateFormatter = {
         let formatter = DateFormatter()
@@ -34,9 +33,10 @@ final class ResponseDecoder {
     func decodeRecords(data: Data) throws -> [Record] {
         let json = try asJSON(data: data)
         let records = json["records"] as? [[String: Any]] ?? []
+        
         return try records.map(_decodeRecord)
     }
-    
+
     /// Decodes a JSON `Data` as a list of `Record`s. It keeps the offset value
     /// and returns an Airtable response object
     ///
@@ -45,17 +45,13 @@ final class ResponseDecoder {
         let json = try asJSON(data: data)
         let records = json["records"] as? [[String: Any]] ?? []
         let decodedRecords = try records.map(_decodeRecord)
+        
     /// Added parsing of offset value if present
-//        var off: String? = nil
-//        if let offset = json["offset"] as? String
-//        {
-//          off = offset
-//        }
         let offset = json["offset"] as? String ?? nil
         let response = AirtableResponse( records: decodedRecords , offset: offset )
-       
     /// Added storage of offset value in shared delegate object
         return response
+
     }
     
     /// Decodes a JSON `Data` from the batch delete request as a list of `Record`s.
