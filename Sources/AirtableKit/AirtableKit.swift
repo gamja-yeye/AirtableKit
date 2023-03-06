@@ -44,7 +44,7 @@ public final class Airtable {
     /// - Parameters:
     ///   - tableName: Name of the table to list records from.
     ///   - fields: Names of the fields that should be included in the response.
-    @available(iOS 14.0, *)
+    @available(iOS 14.0, macOS 11.0, *)
     public func list(tableName: String, fields: [String] = [], view: String? = nil) -> AnyPublisher<[Record], AirtableError> {
         
         let pageOffsetPublisher = CurrentValueSubject<String?, Never>(nil)
