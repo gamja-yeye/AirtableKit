@@ -15,13 +15,17 @@ public final class Airtable {
     
     /// ID of the base manipulated by the client.
     public let baseID: String
+
+    /// ID of the tableID manipulated by the client.
+    public let tableID: String
     
-    /// API key of the user manipulating the base.
-    public let apiKey: String
+    /// The API token of the user.
+    public let token: String
     
     private static let batchLimit: Int = 10
-    private static let airtableURL: URL = URL(string: "https://api.airtable.com/v0")!
-    private var baseURL: URL { Self.airtableURL.appendingPathComponent(baseID) }
+    private var baseURL: URL {
+        URL(string: "https://api.airtable.com/v0/\(baseID)/\(tableID)")!
+    }
     
     private let requestEncoder: RequestEncoder = RequestEncoder()
     private let responseDecoder: ResponseDecoder = ResponseDecoder()
@@ -31,10 +35,12 @@ public final class Airtable {
     ///
     /// - Parameters:
     ///   - baseID: The ID of the base manipulated by the client.
-    ///   - apiKey: The API key of the user manipulating the base.
-    public init(baseID: String, apiKey: String) {
+    ///   - tableID: The ID of the table manipulated by the client.
+    ///   - token: The API token of the user.
+    public init(baseID: String, tableID: String, token: String) {
         self.baseID = baseID
-        self.apiKey = apiKey
+        self.tableID = tableID
+        self.token = token
     }
     
     // MARK: - Recover records from a table
@@ -254,7 +260,7 @@ extension Airtable {
         
         var request = URLRequest(url: theURL)
         request.httpMethod = method
-        request.addValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
+        request.addValue("Authorization: Bearer \(token)", forHTTPHeaderField: "Authorization")
         
         if let payload = payload {
             do {
